@@ -28,9 +28,9 @@ If not using a local vars file, pass credentials to the playbook
 ### To install upstream project quay
 **Optional use of ssl:**  
 
-add `ssl.cert` and `ssl.key` to the files directory and change `USE_SSL:` from false to true  
+add `ssl.cert` and `ssl.key` to the files directory and change `USE_SSL:` from `false` to `true`  
 `ansible-playbook install_project_quay.yml`  
-or  
+or to enable ssl after copying ssl.* into the files directory:   
 `ansible-playbook install_project_quay.yml -e USE_SSL="true"`  
 
 ---
