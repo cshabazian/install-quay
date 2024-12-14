@@ -27,3 +27,5 @@ add ssl.cert and ssl.key to the files directory and change USE_SSL: from false t
 `ansible-playbook install_project_quay.yml`  
 or  
 `ansible-playbook install_project_quay.yml -e USE_SSL="true"`
+---
+*There are many variables in the playbooks that you can change. You SHOULD at least change the passwords*
