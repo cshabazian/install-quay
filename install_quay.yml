@@ -1,0 +1,165 @@
+---
+- name: install quay
+  hosts: localhost
+  become: yes
+  gather_facts: yes
+  connection: local
+  
+  vars:
+    LOCAL_USER_VARS: quay.vars # This file should be in ~/.ansible/<playbook_name> as used above in name:
+    QUAYDIR: /home/quay
+    HOSTNAME: "quay"
+    DOMAINNAME: "example.com"
+    POD_NAME: quay.pod
+    QUAY_CLAIR_PORT: 8081
+    QUAY_HTTP_PORT: 8080
+    QUAY_SSL_PORT: 8443
+    POSTGRESQL_CONTAINER_NAME: postgresql-quay
+    POSTGRESQL_DATABASE: quay
+    POSTGRESQL_USER: quaydbuser
+    POSTGRESQL_PASSWORD: quaydbpass
+    POSTGRESQL_ADMIN_PASSWORD: quayadminpass
+    POSTGRESQL_CONTAINER: rhel8/postgresql-13
+    POSTGRESQL_DIRECTORY: postgres-quay
+    REDIS_CONTAINER_NAME: redis-quay
+    REDIS_PASSWORD: mystrongredispassword
+    REDIS_CONTAINER: rhel8/redis-6:1-110
+    QUAY_CONTAINER_NAME: quay
+    QUAY_CONFIG_DIR: config
+    QUAY_STORAGE_DIR: storage
+    QUAY_CONFIG_FILE: config.yaml
+    QUAY_CONTAINER: quay/quay-rhel8:v3.13.1
+    SUPER_USERS: quayadmin
+    DATABASE_SECRET_KEY: "{{ 99999999 | random | to_uuid }}"
+    SECRET_KEY: "{{ 99999999 | random | to_uuid }}"
+    REGISTRY: registry.redhat.io
+    REGISTRY_USER:
+    REGISTRY_PASS:
+    SSL_CERT: 
+    SSL_KEY: 
+    USE_SSL: false
+    LOCAL_USER_VARS_DIR: "{{ lookup('env','HOME') }}/.ansible/{{ ansible_play_name  | replace (' ','_') }}"
+
+  tasks:
+
+  - name: Load local user variables if they are available
+    ansible.builtin.include_vars:
+      file: "{{ LOCAL_USER_VARS_DIR }}/{{ LOCAL_USER_VARS }}"
+    ignore_errors: yes
+
+  - name: Install podman
+    ansible.builtin.yum:
+      name: podman
+
+  - name: Create directories
+    ansible.builtin.file:
+      state: directory
+      path: "{{ item }}"
+    with_items: 
+      - "{{ QUAYDIR }}/{{ POSTGRESQL_DIRECTORY }}"
+      - "{{ QUAYDIR }}/{{ QUAY_CONFIG_DIR }}"
+      - "{{ QUAYDIR }}/{{ QUAY_STORAGE_DIR }}"
+
+  - name: setfacl on "{{ QUAYDIR }}/{{ POSTGRESQL_DIRECTORY }}"
+    ansible.posix.acl:
+      path: "{{ QUAYDIR }}/{{ POSTGRESQL_DIRECTORY }}"
+      entity: 26
+      etype: user
+      permissions: wx
+      state: present
+
+  - name: setfacl on "{{ QUAYDIR }}/{{ QUAY_STORAGE_DIR }}"
+    ansible.posix.acl:
+      path: "{{ QUAYDIR }}/{{ QUAY_STORAGE_DIR }}"
+      entity: 1001
+      etype: user
+      permissions: wx
+      state: present
+
+  - name: Create {{ QUAY_CONFIG_FILE }}
+    ansible.builtin.template:
+      src: files/config.j2
+      dest: "{{ QUAYDIR }}/{{ QUAY_CONFIG_DIR }}/{{ QUAY_CONFIG_FILE }}"
+
+  - name: Login to registry.redhat.io
+    containers.podman.podman_login:
+      username: "{{ REGISTRY_USER }}"
+      password: "{{ REGISTRY_PASS }}"
+      registry: "{{ REGISTRY }}"
+
+  - name: Create {{ POD_NAME }}
+    containers.podman.podman_pod:
+      name: "{{ POD_NAME }}"
+      state: started
+      ports:
+        - "{{ QUAY_CLAIR_PORT }}:8080"
+        - "{{ QUAY_HTTP_PORT }}:8080"
+        - "{{ QUAY_SSL_PORT }}:8443"
+
+  - name: Create {{ POSTGRESQL_CONTAINER_NAME }}
+    containers.podman.podman_container:
+      name: "{{ POSTGRESQL_CONTAINER_NAME }}"
+      pod: "{{ POD_NAME }}"
+      volume:
+      - "{{ QUAYDIR }}/{{ POSTGRESQL_DIRECTORY }}:/var/lib/pgsql/data:Z"
+      state: started
+      image: "{{ REGISTRY }}/{{ POSTGRESQL_CONTAINER }}"
+      env:
+        POSTGRESQL_USER: "{{ POSTGRESQL_USER }}"
+        POSTGRESQL_PASSWORD: "{{ POSTGRESQL_PASSWORD }}"
+        POSTGRESQL_DATABASE: "{{ POSTGRESQL_DATABASE }}"
+        POSTGRESQL_ADMIN_PASSWORD: "{{ POSTGRESQL_ADMIN_PASSWORD }}"
+
+  - name: Create {{ REDIS_CONTAINER_NAME }}
+    containers.podman.podman_container:
+      name: "{{ REDIS_CONTAINER_NAME }}"
+      pod: "{{ POD_NAME }}"
+      state: started
+      image: "{{ REGISTRY }}/{{ REDIS_CONTAINER }}"
+      env:
+        REDIS_PASSWORD: "{{ REDIS_PASSWORD }}"
+
+# Moved this after "Create {{ REDIS_CONTAINER_NAME }}" as the container needs time to start and configure before this will successfully execute
+  - name: Execute "CREATE EXTENSION IF NOT EXISTS" in {{ POSTGRESQL_CONTAINER_NAME }}
+    containers.podman.podman_container_exec:
+      name: "{{ POSTGRESQL_CONTAINER_NAME }}"
+      command: /bin/bash -c 'echo "CREATE EXTENSION IF NOT EXISTS pg_trgm" | psql -d quay -U postgres'
+
+  - name: Install ssl certificates when {{ USE_SSL }} == true
+    when: USE_SSL
+    block:
+      - name: Copy cert
+        ansible.builtin.copy:
+          src: "{{ SSL_CERT }}"
+          dest: "{{ QUAYDIR }}/{{ QUAY_CONFIG_DIR }}/ssl.cert"
+
+      - name: Copy key
+        ansible.builtin.copy:
+          src: "{{ SSL_KEY }}"
+          dest: "{{ QUAYDIR }}/{{ QUAY_CONFIG_DIR }}/ssl.key"
+
+      - name: Enable ssl
+        ansible.builtin.lineinfile:
+          path: "{{ QUAYDIR }}/{{ QUAY_CONFIG_DIR }}/{{ QUAY_CONFIG_FILE }}"
+          line: "PREFERRED_URL_SCHEME: https"
+          insertafter: EOF
+
+  - name: Create {{ QUAY_CONTAINER_NAME }}
+    containers.podman.podman_container:
+      name: "{{ QUAY_CONTAINER_NAME }}"
+      pod: "{{ POD_NAME }}"
+      state: started
+      image: "{{ REGISTRY }}/{{ QUAY_CONTAINER }}"
+      volume:
+      - "{{ QUAYDIR }}/{{ QUAY_CONFIG_DIR }}:/conf/stack:Z"
+      - "{{ QUAYDIR }}/{{ QUAY_STORAGE_DIR }}:/datastorage:Z"
+
+  - name: Add firewall ports
+    ansible.posix.firewalld:
+      permanent: true
+      state: enabled
+      port: "{{ item }}"
+    with_items:
+      - "{{ QUAY_CLAIR_PORT }}/tcp"
+      - "{{ QUAY_HTTP_PORT }}/tcp"
+      - "{{ QUAY_SSL_PORT }}/tcp"
