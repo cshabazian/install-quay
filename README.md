@@ -1,6 +1,9 @@
 # Ansible playbooks to install either Red Hat Quay or Project Quay
 
 ## Instructions:
+### Clone this repository
+`git clone https://github.com/cshabazian/install-quay.git`
+
 ### Install ansible
 `sudo dnf -y install ansible-core`
 
