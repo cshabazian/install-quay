@@ -2,7 +2,7 @@
 
 ## Instructions:
 ### Install ansible
-'''sudo dnf -y install ansible-core'''
+`sudo dnf -y install ansible-core`
 
 # Install ansible-galaxy requirements
 ansible-galaxy install -r files/requirements.yml
