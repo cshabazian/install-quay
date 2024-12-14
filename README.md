@@ -1,5 +1,8 @@
-# Install ansible
-sudo dnf -y install ansible-core
+# Ansible playbooks to install either Red Hat Quay or Project Quay
+
+## Instructions:
+### Install ansible
+'''sudo dnf -y install ansible-core'''
 
 # Install ansible-galaxy requirements
 ansible-galaxy install -r files/requirements.yml
