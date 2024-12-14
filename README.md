@@ -10,6 +10,8 @@
 ### Install ansible-galaxy requirements
 `ansible-galaxy install -r files/requirements.yml`
 
+---
+
 ### To install Red Hat Quay, you will need to pass credentials, or store them in ~/.ansible/quay.vars
 **Optional use of ssl - Define:**  
 SSL_CERT:  
@@ -20,6 +22,8 @@ and simply run:
 `ansible-playbook install_quay.yml`  
 If not using a local vars file, pass credentials to the playbook  
 `ansible-playbook install_quay.yml -e REGISTRY_USER="<registry_username>" -e REGISTRY_PASS="<registry_pasword>"`
+
+--- 
 
 ### To install upstream project quay
 **Optional use of ssl:**  
